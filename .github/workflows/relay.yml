@@ -1,0 +1,68 @@
+name: EK100 feature relay
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/relay.yml
+
+permissions:
+  contents: write
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install gdown
+        run: python -m pip install -q gdown
+
+      - name: Download EK100 files
+        run: |
+          set -euo pipefail
+          mkdir -p dl release
+
+          gdown --retries 10 -O dl/rgb_kinetics_bninception.zip \
+            "https://drive.google.com/uc?id=1yHm_kOk5gTnYesl_hTld2uT_awmRJt4O"
+          gdown --retries 10 -O dl/target_perframe.zip \
+            "https://drive.google.com/uc?id=1BGv9gW8gIbYhD3yLx5YB7X7GaLjrhKbi"
+          gdown --retries 10 -O dl/verb_perframe.zip \
+            "https://drive.google.com/uc?id=10CGWNLscdq1YdAKOAlx8Y-LfdMrB1zHj"
+          gdown --retries 10 -O dl/noun_perframe.zip \
+            "https://drive.google.com/uc?id=1j8HOCpmVpoFcXXCWBa-H-0gd5K4oOOYM"
+
+          ls -lh dl
+
+      - name: Split and checksum
+        run: |
+          set -euo pipefail
+          cd dl
+          for f in *.zip; do
+            split -b 1800M -d -a 2 "$f" "../release/${f}.part."
+            sha256sum "$f" >> ../release/SHA256SUMS.txt
+          done
+          cd ..
+          ls -lh release
+          ls release | grep -v '^SHA256SUMS.txt$' > release/ASSETS.txt
+          cat release/ASSETS.txt
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG=ek100-features
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "EK100 TeSTra features" \
+              --notes "4fps EK100 RGB BN-Inception features + per-frame labels, split into <2GB assets."
+          fi
+          gh release upload "$TAG" release/* --clobber
+          gh release view "$TAG"
